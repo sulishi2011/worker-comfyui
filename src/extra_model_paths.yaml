@@ -1,6 +1,6 @@
 runpod_worker_comfy:
-  base_path: /runpod-volume
-  checkpoints: models/checkpoints/
+  base_path: /workspace/models
+  checkpoints: /workspace/models/ckpts/
   clip: models/clip/
   clip_vision: models/clip_vision/
   configs: models/configs/
@@ -10,3 +10,6 @@ runpod_worker_comfy:
   upscale_models: models/upscale_models/
   vae: models/vae/
   unet: models/unet/
+
+custom_nodes_path:
+  - /ComfyUI/custom_nodes

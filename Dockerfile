@@ -1,100 +1,81 @@
-# Stage 1: Base image with common dependencies
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04 AS base
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
-# Prevents prompts from packages asking for user input during installation
+# 设置环境变量
 ENV DEBIAN_FRONTEND=noninteractive
-# Prefer binary wheels over source distributions for faster pip installations
 ENV PIP_PREFER_BINARY=1
-# Ensures output from python is printed immediately to the terminal without buffering
 ENV PYTHONUNBUFFERED=1
-# Speed up some cmake builds
-ENV CMAKE_BUILD_PARALLEL_LEVEL=8
+ENV COMFY_HOST="127.0.0.1:7860"
 
-# Install Python, git and other necessary tools
+# 安装必要的依赖包
 RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3-pip \
     git \
     wget \
-    libgl1 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
+    rsync \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Clean up to reduce image size
-RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-RUN pip install uv
-
-# Install comfy-cli
-RUN uv pip install comfy-cli --system
-
-# Install ComfyUI
-RUN /usr/bin/yes | comfy --workspace /comfyui install --version 0.3.30 --cuda-version 12.6 --nvidia
-
-# Change working directory to ComfyUI
-WORKDIR /comfyui
-
-# Support for the network volume
-ADD src/extra_model_paths.yaml ./
-
-# Go back to the root
+# 克隆 worker-comfyui 配置
 WORKDIR /
+RUN git clone https://github.com/sulishi2011/worker-comfyui.git /worker-comfyui
 
-# Install Python runtime dependencies for the handler
-RUN uv pip install runpod requests websocket-client --system
+# 克隆 ComfyUI 并切换到指定版本
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI && \
+    cd /ComfyUI && \
+    git checkout tags/v0.3.15
 
-# Add application code and scripts
-ADD src/start.sh handler.py test_input.json ./
+# 安装 ComfyUI 依赖
+WORKDIR /ComfyUI
+RUN pip install -r requirements.txt
+
+# 安装 worker-comfyui 依赖
+RUN pip install runpod requests websocket-client
+
+# 下载 Miniconda
+WORKDIR /root
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /root/miniconda3 && \
+    rm miniconda.sh
+
+# 将 Miniconda 添加到 PATH
+ENV PATH="/root/miniconda3/bin:${PATH}"
+
+# 安装 huggingface-cli
+RUN pip install huggingface_hub
+
+# 下载 comfyui_env.tar.gz
+WORKDIR /
+RUN huggingface-cli download ChuuniZ/comfyui_env comfyui_env.tar.gz --local-dir ./
+
+# 创建并设置 conda 环境
+RUN mkdir -p /root/miniconda3/envs/comfyui && \
+    tar -xzf comfyui_env.tar.gz -C /root/miniconda3/envs/comfyui && \
+    rm comfyui_env.tar.gz
+
+# 添加修复环境的命令到启动脚本
+RUN echo '#!/bin/bash\n\
+source /root/miniconda3/envs/comfyui/bin/activate\n\
+conda-unpack\n\
+' > /fix_env.sh && chmod +x /fix_env.sh
+
+# 复制自定义的 extra_model_paths.yaml
+COPY src/extra_model_paths.yaml /ComfyUI/extra_model_paths.yaml
+
+# 处理模型目录
+WORKDIR /ComfyUI
+RUN rm -rf models/* && \
+    mkdir -p models
+
+# 复制 worker-comfyui 的处理程序到容器
+COPY handler.py /worker-comfyui/handler.py
+
+# 复制 comfyui_start.sh 到容器
+COPY comfyui_start.sh /comfyui_start.sh
+RUN chmod +x /comfyui_start.sh
+
+# 创建启动脚本
+COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Set the default command to run when starting the container
+WORKDIR /
 CMD ["/start.sh"]
-
-# Stage 2: Download models
-FROM base AS downloader
-
-ARG HUGGINGFACE_ACCESS_TOKEN
-# Set default model type if none is provided
-ARG MODEL_TYPE=flux1-dev-fp8
-
-# Change working directory to ComfyUI
-WORKDIR /comfyui
-
-# Create necessary directories upfront
-RUN mkdir -p models/checkpoints models/vae models/unet models/clip
-
-# Download checkpoints/vae/unet/clip models to include in image based on model type
-RUN if [ "$MODEL_TYPE" = "sdxl" ]; then \
-      wget -q -O models/checkpoints/sd_xl_base_1.0.safetensors https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors && \
-      wget -q -O models/vae/sdxl_vae.safetensors https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors && \
-      wget -q -O models/vae/sdxl-vae-fp16-fix.safetensors https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/main/sdxl_vae.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "sd3" ]; then \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/checkpoints/sd3_medium_incl_clips_t5xxlfp8.safetensors https://huggingface.co/stabilityai/stable-diffusion-3-medium/resolve/main/sd3_medium_incl_clips_t5xxlfp8.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "flux1-schnell" ]; then \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/unet/flux1-schnell.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors && \
-      wget -q -O models/clip/clip_l.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors && \
-      wget -q -O models/clip/t5xxl_fp8_e4m3fn.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors && \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "flux1-dev" ]; then \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/unet/flux1-dev.safetensors https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors && \
-      wget -q -O models/clip/clip_l.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors && \
-      wget -q -O models/clip/t5xxl_fp8_e4m3fn.safetensors https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors && \
-      wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/vae/ae.safetensors https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors; \
-    fi
-
-RUN if [ "$MODEL_TYPE" = "flux1-dev-fp8" ]; then \
-      wget -q -O models/checkpoints/flux1-dev-fp8.safetensors https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors; \
-    fi
-
-# Stage 3: Final image
-FROM base AS final
-
-# Copy models from stage 2 to the final image
-COPY --from=downloader /comfyui/models /comfyui/models

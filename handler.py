@@ -21,7 +21,7 @@ COMFY_API_AVAILABLE_MAX_RETRIES = 500
 WEBSOCKET_RECONNECT_ATTEMPTS = 2
 WEBSOCKET_RECONNECT_DELAY_S = 3
 # Host where ComfyUI is running
-COMFY_HOST = "127.0.0.1:8188"
+COMFY_HOST = "127.0.0.1:7860"
 # Enforce a clean state after each job is done
 # see https://docs.runpod.io/docs/handler-additional-controls#refresh-worker
 REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
