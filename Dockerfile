@@ -27,7 +27,7 @@ RUN rm -rf /ComfyUI/.git /worker-comfyui/.git
 # 安装 ComfyUI 依赖
 WORKDIR /ComfyUI
 RUN pip install -r requirements.txt && \
-    pip install runpod requests websocket-client huggingface_hub && \
+    pip install huggingface_hub && \
     pip cache purge
 
 # 下载 Miniconda
@@ -43,10 +43,15 @@ ENV PATH="/root/miniconda3/bin:${PATH}"
 # 下载和解压 comfyui_env.tar.gz
 WORKDIR /
 RUN mkdir -p /root/miniconda3/envs/comfyui && \
-    huggingface-cli download ChuuniZ/comfyui_env comfyui_env.tar.gz --local-dir ./ && \
-    tar -xzf comfyui_env.tar.gz -C /root/miniconda3/envs/comfyui && \
-    rm comfyui_env.tar.gz && \
+    huggingface-cli download ChuuniZ/comfyui_env comfyui_env_smaller.tar.gz --local-dir ./ && \
+    tar -xzf comfyui_env_smaller.tar.gz -C /root/miniconda3/envs/comfyui && \
+    rm comfyui_env_smaller.tar.gz && \
     rm -rf ~/.cache/huggingface
+
+# 在conda环境中安装runpod
+RUN /root/miniconda3/bin/pip install runpod && \
+    /root/miniconda3/bin/pip install websocket-client && \
+    /root/miniconda3/bin/pip install requests
 
 # 添加环境修复脚本
 RUN echo '#!/bin/bash\n\

@@ -5,7 +5,7 @@ source /root/miniconda3/envs/comfyui/bin/activate
 conda-unpack
 
 # 同步自定义节点
-rsync -av /workspace/custom_nodes/ /ComfyUI/custom_nodes/
+rsync -av --exclude='.cache' /workspace/custom_nodes/ /ComfyUI/custom_nodes/
 
 # 创建模型符号链接
 cd /ComfyUI/models/
