@@ -8,13 +8,9 @@ ENV COMFY_HOST="127.0.0.1:7860"
 
 # 安装依赖包
 RUN apt-get update && \
-    apt-get install -y git wget rsync curl && \
+    apt-get install -y git wget rsync curl nginx && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
-# 克隆 worker-comfyui 配置
-WORKDIR /
-RUN git clone https://github.com/sulishi2011/worker-comfyui.git /worker-comfyui
 
 # 克隆 ComfyUI 并切换到指定版本
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI && \
@@ -22,7 +18,7 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI && \
     git checkout tags/v0.3.15
 
 # 清理git文件
-RUN rm -rf /ComfyUI/.git /worker-comfyui/.git
+RUN rm -rf /ComfyUI/.git
 
 # 安装 ComfyUI 依赖
 WORKDIR /ComfyUI
@@ -48,10 +44,8 @@ RUN mkdir -p /root/miniconda3/envs/comfyui && \
     rm comfyui_env_smaller.tar.gz && \
     rm -rf ~/.cache/huggingface
 
-# 在conda环境中安装runpod
-RUN /root/miniconda3/bin/pip install runpod && \
-    /root/miniconda3/bin/pip install websocket-client && \
-    /root/miniconda3/bin/pip install requests
+# 在conda环境中安装需要的库
+RUN /root/miniconda3/bin/pip install requests websocket-client
 
 # 添加环境修复脚本
 RUN echo '#!/bin/bash\n\
@@ -59,14 +53,17 @@ source /root/miniconda3/envs/comfyui/bin/activate\n\
 conda-unpack\n\
 ' > /fix_env.sh && chmod +x /fix_env.sh
 
+# 设置 Nginx 配置
+RUN mkdir -p /nginx/conf
+COPY nginx/nginx.conf /nginx/conf/nginx.conf
+
 # 复制文件和设置目录
 COPY src/extra_model_paths.yaml /ComfyUI/extra_model_paths.yaml
-COPY handler.py /worker-comfyui/handler.py
 COPY comfyui_start.sh /comfyui_start.sh
-COPY start.sh /start.sh
+COPY pod_start.sh /pod_start.sh
 
 # 设置权限并清理模型目录
-RUN chmod +x /comfyui_start.sh /start.sh && \
+RUN chmod +x /comfyui_start.sh /pod_start.sh && \
     rm -rf /ComfyUI/models/* && \
     mkdir -p /ComfyUI/models
 
@@ -76,4 +73,4 @@ RUN pip cache purge && \
     find / -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 WORKDIR /
-CMD ["/start.sh"]
+CMD ["/pod_start.sh"]
