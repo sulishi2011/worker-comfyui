@@ -13,7 +13,7 @@ nginx -c /nginx/conf/nginx.conf
 
 # 同步自定义节点
 echo "同步自定义节点..."
-rsync -av --exclude='.cache' /workspace/custom_nodes/ /ComfyUI/custom_nodes/
+rsync -av --exclude='.cache' --exclude='ComfyUI-Login' /workspace/custom_nodes/ /ComfyUI/custom_nodes/
 
 # 创建模型符号链接
 echo "创建模型符号链接..."
